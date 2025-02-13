@@ -1,6 +1,11 @@
 part of "../../client.dart";
 
 class _ClientImpl implements Client {
+  _ClientImpl({ConnectionSettings? settings}) {
+    // Use defaults if no settings specified
+    this.settings = settings ?? ConnectionSettings();
+  }
+
   // Configuration options
   @override
   late ConnectionSettings settings;
@@ -31,11 +36,6 @@ class _ClientImpl implements Client {
   // connection if we have not received any message from the server for a
   // consecutive number of maxMissedHeartbeats (see tuningSettings).
   RestartableTimer? _heartbeatRecvTimer;
-
-  _ClientImpl({ConnectionSettings? settings}) {
-    // Use defaults if no settings specified
-    this.settings = settings ?? ConnectionSettings();
-  }
 
   /// Attempt to reconnect to the server. If the attempt fails, it will be retried after
   /// [reconnectWaitTime] ms up to [maxConnectionAttempts] times. If all connection attempts
@@ -103,8 +103,9 @@ class _ClientImpl implements Client {
 
   /// Check if a connection is currently in handshake state
   @override
-  bool get handshaking =>
-      _socket != null && _connected != null && !_connected!.isCompleted;
+  bool get handshaking {
+    return _socket != null && _connected != null && !_connected!.isCompleted;
+  }
 
   void _handleMessage(DecodedMessage serverMessage) {
     try {
@@ -237,7 +238,6 @@ class _ClientImpl implements Client {
       case HeartbeatFailedException:
       case FatalException:
       case ConnectionException:
-
         // Forward to all channels and then shutdown
         _channels.values
             .toList()
@@ -280,6 +280,12 @@ class _ClientImpl implements Client {
   }
 
   Future _close({bool closeErrorStream = false}) {
+    if (_connected?.isCompleted != true) {
+      try {
+        _connected?.completeError(StateError('close'));
+      } catch (_) {}
+    }
+
     _heartbeatRecvTimer?.cancel();
     _heartbeatRecvTimer = null;
 
@@ -349,12 +355,24 @@ class _ClientImpl implements Client {
 
   @override
   StreamSubscription<Exception> errorListener(
-          void Function(Exception error) onData,
-          {Function? onError,
-          void Function()? onDone,
-          bool cancelOnError = false}) =>
-      _error.stream.listen(onData,
-          onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+    void Function(Exception error) onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool cancelOnError = false,
+  }) {
+    return _error.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
 
   _ChannelImpl _removeChannel(int channelId) => _channels.remove(channelId)!;
+
+  @override
+  Future<void> killSocket() async {
+    _socket?.destroy();
+    _socket = null;
+  }
 }
